@@ -52,7 +52,7 @@ def date_and_time_of_observation(raw_daytime_value):
 
 # save_weather_data(convert_LV95_to_WGS84(2790000, 1190070, 2450), '2010-01-01', '2010-01-05', 'weather_data_instability', 'test')
 
-def download_data():
+def download_weather_data():
     for stability_measurement in snow_instability.itertuples():
         measurement_coordinates = convert_LV95_to_WGS84(int(2000000 + stability_measurement.X_Coordinate),
                                                         int(1000000 + stability_measurement.Y_Coordinate),
