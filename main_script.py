@@ -52,6 +52,28 @@ def date_and_time_of_observation(raw_daytime_value):
 
 # save_weather_data(convert_LV95_to_WGS84(2790000, 1190070, 2450), '2010-01-01', '2010-01-05', 'weather_data_instability', 'test')
 
+def download_data():
+    for stability_measurement in snow_instability.itertuples():
+        measurement_coordinates = convert_LV95_to_WGS84(int(2000000 + stability_measurement.X_Coordinate),
+                                                        int(1000000 + stability_measurement.Y_Coordinate),
+                                                        int(stability_measurement.Elevation))
+        save_weather_data(measurement_coordinates,
+                          str((date_and_time_of_observation(stability_measurement.Date_time) - timedelta(
+                              days=14)).date()),
+                          str(date_and_time_of_observation(stability_measurement.Date_time).date()),
+                          'weather_data_instability',
+                          'No' + str(int(stability_measurement.No)))
+
+    for avalanche_accident in avalanche_accidents.itertuples():
+        accident_coordinates = convert_LV95_to_WGS84(int(2000000 + avalanche_accident.start_zone_coordinates_x),
+                                                     int(1000000 + avalanche_accident.start_zone_coordinates_y),
+                                                     int(avalanche_accident.start_zone_elevation))
+        save_weather_data(accident_coordinates,
+                          str((datetime.fromisoformat(avalanche_accident.date) - timedelta(days=14)).date()),
+                          avalanche_accident.date,
+                          'weather_data_avalanches',
+                          'ID' + str(int(avalanche_accident.avalanche_id)))
+
 
 snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
 snow_instability = snow_instability[:-10]
