@@ -5,6 +5,8 @@ import json
 from geopy import distance
 from datetime import datetime, timedelta
 from io import StringIO
+import cmath
+import time
 
 
 def convert_LV95_to_WGS84(easting, northing, altitute = None):
@@ -35,7 +37,7 @@ def save_weather_data(coordinates, start_date, end_date, folder_name, filename):
                    start_date +
                    "&end_date=" +
                    end_date +
-                   "&daily=wind_direction_10m_dominant,precipitation_sum,rain_sum,snowfall_sum&hourly=temperature_2m,snowfall,rain,snow_depth,precipitation,wind_speed_10m,wind_speed_100m,wind_direction_10m,wind_direction_100m,wind_gusts_10m,sunshine_duration,cloud_cover&models=cerra,best_match&timezone=auto&elevation=" +
+                   "&daily=wind_direction_10m_dominant,precipitation_sum,rain_sum,snowfall_sum&hourly=temperature_2m,snowfall,rain,snow_depth,precipitation,wind_speed_10m,wind_speed_100m,wind_direction_10m,wind_direction_100m,wind_gusts_10m,sunshine_duration,cloud_cover&models=cerra&timezone=auto&elevation=" +
                    str(coordinates['altitude']) +
                    "&format=csv")
     weather_data = open(folder_name + "/" + filename + ".csv", "w")
@@ -58,6 +60,8 @@ def download_weather_data():
         measurement_coordinates = convert_LV95_to_WGS84(int(2000000 + stability_measurement.X_Coordinate),
                                                         int(1000000 + stability_measurement.Y_Coordinate),
                                                         int(stability_measurement.Elevation))
+        if int(stability_measurement.No) in [100, 200, 300, 400, 500]:
+            time.sleep(60) # Comply with API restrictions
         save_weather_data(measurement_coordinates,
                           str((date_and_time_of_observation(stability_measurement.Date_time) - timedelta(
                               days=14)).date()),
@@ -69,6 +73,8 @@ def download_weather_data():
         accident_coordinates = convert_LV95_to_WGS84(int(2000000 + avalanche_accident.start_zone_coordinates_x),
                                                      int(1000000 + avalanche_accident.start_zone_coordinates_y),
                                                      int(avalanche_accident.start_zone_elevation))
+        if avalanche_accident[0] in [100, 200, 300, 400, 500]:
+            time.sleep(60) # Comply with API restrictions
         save_weather_data(accident_coordinates,
                           str((datetime.fromisoformat(avalanche_accident.date) - timedelta(days=14)).date()),
                           avalanche_accident.date,
@@ -76,15 +82,121 @@ def download_weather_data():
                           'ID' + str(int(avalanche_accident.avalanche_id)))
 
 
+def polar2complex(r, theta):
+    return r * np.exp(1j * theta)
+
+def weather_slice(weather_data_csv_path, measurement_window):
+    with open(weather_data_csv_path) as weather_data_file:
+        weather_hourly = pd.read_csv(StringIO(weather_data_file.read().split('\n\n')[1]), sep=',')
+    measurement_date = datetime.strptime(weather_hourly.iloc[-1].time.split('T')[0], '%Y-%m-%d')
+    weather_hourly['time'] = pd.to_datetime(weather_hourly['time'])
+    weather_hourly = weather_hourly.set_index('time')
+    if measurement_window == 1:
+        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=1)).strftime('%Y-%m-%d')]
+    elif measurement_window == 2:
+        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=3)).strftime('%Y-%m-%d'):(measurement_date - timedelta(days=2)).strftime('%Y-%m-%d')]
+    elif measurement_window == 3:
+        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=7)).strftime('%Y-%m-%d'):(measurement_date - timedelta(days=4)).strftime('%Y-%m-%d')]
+    elif measurement_window == 4:
+        weather_in_window = weather_hourly.loc[:(measurement_date - timedelta(days=8)).strftime('%Y-%m-%d')]
+    return weather_in_window
+
+
+def snowfall_aspect_bias(weather_data_csv_path, measurement_window):
+    wind_vector = 0j
+    for _, row in weather_slice(weather_data_csv_path, measurement_window).iterrows():
+        if row['precipitation (mm)'] != 0:
+            wind_vector = wind_vector + cmath.rect(row['wind_speed_10m (km/h)'], -np.pi*row['wind_direction_10m (°)']/180 + np.pi/2) #mistake_ok
+    return cmath.polar(wind_vector)
+
+
+def accumulated_snow_calculation(weather_data_csv_path, measurement_window):
+    total_snowfall = 0
+    for _, row in weather_slice(weather_data_csv_path, measurement_window).iterrows():
+        if row['snowfall (cm)'] != 0:
+            total_snowfall = total_snowfall + row['precipitation (mm)']
+    return total_snowfall
+
+
+def mean_temperature(weather_data_csv_path, measurement_window):
+    return weather_slice(weather_data_csv_path, measurement_window)['temperature_2m (°C)'].mean()
+
+
+def std_temperature(weather_data_csv_path, measurement_window):
+    return weather_slice(weather_data_csv_path, measurement_window)['temperature_2m (°C)'].std()
+
+
+def sunshine_percentage(weather_data_csv_path, measurement_window):
+    temperature_in_window = weather_slice(weather_data_csv_path, measurement_window)['sunshine_duration (s)']
+    return temperature_in_window.sum()/(len(temperature_in_window) * 3600)
+
+
+def create_df_for_instability_model(instability_df):
+    cleaned_data = instability_df[['No', 'Profile_ID', 'Date_time', 'Aspect', 'X_Coordinate', 'Y_Coordinate', 'Elevation', 'Slope_angle_degrees', 'RB_score', 'RB_release_type', 'RB_height_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'SNPK_Index', 'HN24_cm', 'HN3d_cm']].copy()
+    aspect_radians = {
+        'N': np.pi/2,
+        'NNE': 3*np.pi/8,
+        'NE': np.pi/4,
+        'ENE': np.pi/8,
+        'E': 0,
+        'ESE': -np.pi/8,
+        'SE': -np.pi/4,
+        'SSE': -3*np.pi/8,
+        'S': -np.pi/2,
+        'SSW': -5*np.pi/8,
+        'SW': -3*np.pi/4,
+        'WSW': -7*np.pi/8,
+        'W': np.pi,
+        'WNW': 7*np.pi/8,
+        'NW': 3*np.pi/4,
+        'NNW': 5*np.pi/8
+    }
+    cleaned_data['Aspect'] = cleaned_data['Aspect'].map(aspect_radians)
+
+    cleaned_data['Accumulated_Snow_1d'] = cleaned_data['No'].map(lambda x: accumulated_snow_calculation('weather_data_instability/No' + str(int(x)) + '.csv', 1))
+    cleaned_data['Accumulated_Snow_3d'] = cleaned_data['No'].map(lambda x: accumulated_snow_calculation('weather_data_instability/No' + str(int(x)) + '.csv', 2))
+    cleaned_data['Accumulated_Snow_7d'] = cleaned_data['No'].map(lambda x: accumulated_snow_calculation('weather_data_instability/No' + str(int(x)) + '.csv', 3))
+    cleaned_data['Accumulated_Snow_14d'] = cleaned_data['No'].map(lambda x: accumulated_snow_calculation('weather_data_instability/No' + str(int(x)) + '.csv', 4))
+
+    cleaned_data['Wind_Induced_Accumulation_Magnitude_1d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 1)[0])
+    cleaned_data['Wind_Induced_Accumulation_Magnitude_3d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 2)[0])
+    cleaned_data['Wind_Induced_Accumulation_Magnitude_7d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 3)[0])
+    cleaned_data['Wind_Induced_Accumulation_Magnitude_14d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 4)[0])
+
+    cleaned_data['Wind_Induced_Accumulation_Aspect_1d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 1)[1])
+    cleaned_data['Wind_Induced_Accumulation_Aspect_3d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 2)[1])
+    cleaned_data['Wind_Induced_Accumulation_Aspect_7d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 3)[1])
+    cleaned_data['Wind_Induced_Accumulation_Aspect_14d'] = cleaned_data['No'].map(lambda x: snowfall_aspect_bias('weather_data_instability/No' + str(int(x)) + '.csv', 4)[1])
+
+    cleaned_data['Average_Temperature_1d'] = cleaned_data['No'].map(lambda x: mean_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 1))
+    cleaned_data['Average_Temperature_3d'] = cleaned_data['No'].map(lambda x: mean_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 2))
+    cleaned_data['Average_Temperature_7d'] = cleaned_data['No'].map(lambda x: mean_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 3))
+    cleaned_data['Average_Temperature_14d'] = cleaned_data['No'].map(lambda x: mean_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 4))
+
+    cleaned_data['SD_Temperature_1d'] = cleaned_data['No'].map(lambda x: std_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 1))
+    cleaned_data['SD_Temperature_3d'] = cleaned_data['No'].map(lambda x: std_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 2))
+    cleaned_data['SD_Temperature_7d'] = cleaned_data['No'].map(lambda x: std_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 3))
+    cleaned_data['SD_Temperature_14d'] = cleaned_data['No'].map(lambda x: std_temperature('weather_data_instability/No' + str(int(x)) + '.csv', 4))
+
+    cleaned_data['Sunshine_Percentage_1d'] = cleaned_data['No'].map(lambda x: sunshine_percentage('weather_data_instability/No' + str(int(x)) + '.csv', 1))
+    cleaned_data['Sunshine_Percentage_3d'] = cleaned_data['No'].map(lambda x: sunshine_percentage('weather_data_instability/No' + str(int(x)) + '.csv', 2))
+    cleaned_data['Sunshine_Percentage_7d'] = cleaned_data['No'].map(lambda x: sunshine_percentage('weather_data_instability/No' + str(int(x)) + '.csv', 3))
+    cleaned_data['Sunshine_Percentage_14d'] = cleaned_data['No'].map(lambda x: sunshine_percentage('weather_data_instability/No' + str(int(x)) + '.csv', 4))
+
+    return cleaned_data
+
+
 if __name__ == '__main__':
     snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
     snow_instability = snow_instability[:-10]
     avalanche_accidents = pd.read_csv("avalanche_accidents_switzerland_since_1995.csv", sep = ",", encoding="ISO-8859-1")
 
+    # download_weather_data()
 
-    cor_matrix = snow_instability[['Profile_class', 'five_class_Stability', 'RB_score', 'RB_release_type', 'Fracture_plane_quality', 'S2008_1_RB', 'S2008_2_RT', 'S2008_3_Lemons', 'three_class_Stability', 'four_class_Stability_Techel', 'RB_height_cm', 'Snow_depth_cm', 'Slab_thickness_cm', 'FL_Thickness_cm', 'AL_Thickness_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'FL_Grain_size_max_mm', 'AL_Grain_size_max_mm', 'FL_Grain_type1', 'FL_Grain_type2', 'FL_Hardness', 'FL_Top_Height_cm', 'FL_Bottom_Height_cm', 'AL_Top_Height_cm', 'AL_Bottom_Height_cm', 'AL_Hardness', 'Hard_Diff', 'Abs_Hard_Diff', 'Grain_Size_Diff_mm', 'FL_location', 'Lemon1_E', 'Lemon2_R', 'Lemon3_F', 'Lemon4_dE', 'Lemon5_dR', 'Lemon6_FLD', 'Lemons_FL', 'Whumpfs', 'Cracks', 'Avalanche_activity', 'LN_Local_danger_level_nowcast', 'LN_rounded', 'RF_Regional _danger_level_forecast', 'Deviation_LN_RF', 'SNPK_Index', 'SNPK_Index_Class']].corr()
-    print(cor_matrix)
-    cor_matrix.to_csv('correlation_matrix.csv', sep = ',')
 
-    snow_instability.describe()
+    # cor_matrix = snow_instability[['Profile_class', 'five_class_Stability', 'RB_score', 'RB_release_type', 'Fracture_plane_quality', 'S2008_1_RB', 'S2008_2_RT', 'S2008_3_Lemons', 'three_class_Stability', 'four_class_Stability_Techel', 'RB_height_cm', 'Snow_depth_cm', 'Slab_thickness_cm', 'FL_Thickness_cm', 'AL_Thickness_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'FL_Grain_size_max_mm', 'AL_Grain_size_max_mm', 'FL_Grain_type1', 'FL_Grain_type2', 'FL_Hardness', 'FL_Top_Height_cm', 'FL_Bottom_Height_cm', 'AL_Top_Height_cm', 'AL_Bottom_Height_cm', 'AL_Hardness', 'Hard_Diff', 'Abs_Hard_Diff', 'Grain_Size_Diff_mm', 'FL_location', 'Lemon1_E', 'Lemon2_R', 'Lemon3_F', 'Lemon4_dE', 'Lemon5_dR', 'Lemon6_FLD', 'Lemons_FL', 'Whumpfs', 'Cracks', 'Avalanche_activity', 'LN_Local_danger_level_nowcast', 'LN_rounded', 'RF_Regional _danger_level_forecast', 'Deviation_LN_RF', 'SNPK_Index', 'SNPK_Index_Class']].corr()
+    # print(cor_matrix)
+    # cor_matrix.to_csv('correlation_matrix.csv', sep = ',')
+    #
+    # snow_instability.describe()
 
