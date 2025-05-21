@@ -4,6 +4,7 @@ from urllib3 import request
 import json
 from geopy import distance
 from datetime import datetime, timedelta
+from io import StringIO
 
 
 def convert_LV95_to_WGS84(easting, northing, altitute = None):
@@ -75,28 +76,15 @@ def download_weather_data():
                           'ID' + str(int(avalanche_accident.avalanche_id)))
 
 
-snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
-snow_instability = snow_instability[:-10]
-avalanche_accidents = pd.read_csv("avalanche_accidents_switzerland_since_1995.csv", sep = ",", encoding="ISO-8859-1")
+if __name__ == '__main__':
+    snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
+    snow_instability = snow_instability[:-10]
+    avalanche_accidents = pd.read_csv("avalanche_accidents_switzerland_since_1995.csv", sep = ",", encoding="ISO-8859-1")
 
 
-for stability_measurement in snow_instability.itertuples():
-    measurement_coordinates = convert_LV95_to_WGS84(int(2000000 + stability_measurement.X_Coordinate),
-                                                    int(1000000 + stability_measurement.Y_Coordinate),
-                                                    int(stability_measurement.Elevation))
-    save_weather_data(measurement_coordinates,
-                      str((date_and_time_of_observation(stability_measurement.Date_time) - timedelta(days=14)).date()),
-                      str(date_and_time_of_observation(stability_measurement.Date_time).date()),
-                      'weather_data_instability',
-                      'No' + str(int(stability_measurement.No)))
+    cor_matrix = snow_instability[['Profile_class', 'five_class_Stability', 'RB_score', 'RB_release_type', 'Fracture_plane_quality', 'S2008_1_RB', 'S2008_2_RT', 'S2008_3_Lemons', 'three_class_Stability', 'four_class_Stability_Techel', 'RB_height_cm', 'Snow_depth_cm', 'Slab_thickness_cm', 'FL_Thickness_cm', 'AL_Thickness_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'FL_Grain_size_max_mm', 'AL_Grain_size_max_mm', 'FL_Grain_type1', 'FL_Grain_type2', 'FL_Hardness', 'FL_Top_Height_cm', 'FL_Bottom_Height_cm', 'AL_Top_Height_cm', 'AL_Bottom_Height_cm', 'AL_Hardness', 'Hard_Diff', 'Abs_Hard_Diff', 'Grain_Size_Diff_mm', 'FL_location', 'Lemon1_E', 'Lemon2_R', 'Lemon3_F', 'Lemon4_dE', 'Lemon5_dR', 'Lemon6_FLD', 'Lemons_FL', 'Whumpfs', 'Cracks', 'Avalanche_activity', 'LN_Local_danger_level_nowcast', 'LN_rounded', 'RF_Regional _danger_level_forecast', 'Deviation_LN_RF', 'SNPK_Index', 'SNPK_Index_Class']].corr()
+    print(cor_matrix)
+    cor_matrix.to_csv('correlation_matrix.csv', sep = ',')
 
+    snow_instability.describe()
 
-for avalanche_accident in avalanche_accidents.itertuples():
-    accident_coordinates = convert_LV95_to_WGS84(int(2000000 + avalanche_accident.start_zone_coordinates_x),
-                                                 int(1000000 + avalanche_accident.start_zone_coordinates_y),
-                                                 int(avalanche_accident.start_zone_elevation))
-    save_weather_data(accident_coordinates,
-                       str((datetime.fromisoformat(avalanche_accident.date) - timedelta(days=14)).date()),
-                       avalanche_accident.date,
-                       'weather_data_avalanches',
-                       'ID' + str(int(avalanche_accident.avalanche_id)))
