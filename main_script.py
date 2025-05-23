@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 import cmath
 import time
+import statsmodels.formula.api as smf
 
 
 def convert_LV95_to_WGS84(easting, northing, altitute = None):
@@ -183,13 +184,33 @@ def create_df_for_instability_model(instability_df):
     cleaned_data['Sunshine_Percentage_7d'] = cleaned_data['No'].map(lambda x: sunshine_percentage('weather_data_instability/No' + str(int(x)) + '.csv', 3))
     cleaned_data['Sunshine_Percentage_14d'] = cleaned_data['No'].map(lambda x: sunshine_percentage('weather_data_instability/No' + str(int(x)) + '.csv', 4))
 
+    cleaned_data['Aspect_Delta_1d'] = np.minimum(
+        abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_1d']),
+        2*np.pi - abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_1d']))
+    cleaned_data['Aspect_Delta_3d'] = np.minimum(
+        abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_3d']),
+        2 * np.pi - abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_3d']))
+    cleaned_data['Aspect_Delta_7d'] = np.minimum(
+        abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_7d']),
+        2 * np.pi - abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_7d']))
+    cleaned_data['Aspect_Delta_14d'] = np.minimum(
+        abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_14d']),
+        2 * np.pi - abs(cleaned_data['Aspect'] - cleaned_data['Wind_Induced_Accumulation_Aspect_14d']))
+
     return cleaned_data
 
 
-if __name__ == '__main__':
-    snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
+def data_setup():
+    snow_instability = pd.read_csv("snow_instability_field_data.csv", sep=";")
     snow_instability = snow_instability[:-10]
-    avalanche_accidents = pd.read_csv("avalanche_accidents_switzerland_since_1995.csv", sep = ",", encoding="ISO-8859-1")
+    cleand_data = create_df_for_instability_model(snow_instability)
+    cleand_data.to_csv('cleand_data.csv', sep=',')
+
+
+if __name__ == 'hello':
+    # snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
+    # snow_instability = snow_instability[:-10]
+    # avalanche_accidents = pd.read_csv("avalanche_accidents_switzerland_since_1995.csv", sep = ",", encoding="ISO-8859-1")
 
     # download_weather_data()
 
@@ -200,3 +221,46 @@ if __name__ == '__main__':
     #
     # snow_instability.describe()
 
+    # cleand = create_df_for_instability_model(snow_instability)
+
+    # data_setup()
+
+    cleand = pd.read_csv('cleand_data.csv', sep=',')
+
+    model1 = smf.ols(
+        formula='RB_score ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d + Aspect_Delta_1d : Wind_Induced_Accumulation_Magnitude_1d + Aspect_Delta_3d : Wind_Induced_Accumulation_Magnitude_3d + Aspect_Delta_7d : Wind_Induced_Accumulation_Magnitude_7d + Aspect_Delta_14d : Wind_Induced_Accumulation_Magnitude_14d',
+        data=cleand).fit()
+    model2 = smf.ols(
+        formula='RB_score ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d',
+        data=cleand).fit()
+    model3 = smf.ols(
+        formula='RB_release_type ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d + Aspect_Delta_1d : Wind_Induced_Accumulation_Magnitude_1d + Aspect_Delta_3d : Wind_Induced_Accumulation_Magnitude_3d + Aspect_Delta_7d : Wind_Induced_Accumulation_Magnitude_7d + Aspect_Delta_14d : Wind_Induced_Accumulation_Magnitude_14d',
+        data=cleand).fit()
+    model4 = smf.ols(
+        formula='RB_height_cm ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d + Aspect_Delta_1d : Wind_Induced_Accumulation_Magnitude_1d + Aspect_Delta_3d : Wind_Induced_Accumulation_Magnitude_3d + Aspect_Delta_7d : Wind_Induced_Accumulation_Magnitude_7d + Aspect_Delta_14d : Wind_Induced_Accumulation_Magnitude_14d',
+        data=cleand).fit()
+    model5 = smf.ols(
+        formula='FL_Grain_size_avg_mm ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d + Aspect_Delta_1d : Wind_Induced_Accumulation_Magnitude_1d + Aspect_Delta_3d : Wind_Induced_Accumulation_Magnitude_3d + Aspect_Delta_7d : Wind_Induced_Accumulation_Magnitude_7d + Aspect_Delta_14d : Wind_Induced_Accumulation_Magnitude_14d',
+        data=cleand).fit()
+    model6 = smf.ols(
+        formula='AL_Grain_size_avg_mm ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d + Aspect_Delta_1d : Wind_Induced_Accumulation_Magnitude_1d + Aspect_Delta_3d : Wind_Induced_Accumulation_Magnitude_3d + Aspect_Delta_7d : Wind_Induced_Accumulation_Magnitude_7d + Aspect_Delta_14d : Wind_Induced_Accumulation_Magnitude_14d',
+        data=cleand).fit()
+    model7 = smf.ols(
+        formula='SNPK_Index ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d + Aspect_Delta_1d : Wind_Induced_Accumulation_Magnitude_1d + Aspect_Delta_3d : Wind_Induced_Accumulation_Magnitude_3d + Aspect_Delta_7d : Wind_Induced_Accumulation_Magnitude_7d + Aspect_Delta_14d : Wind_Induced_Accumulation_Magnitude_14d',
+        data=cleand).fit()
+
+
+    print(model1.summary())
+    print(model2.summary())
+    print(model3.summary())
+    print(model4.summary())
+    print(model5.summary())
+    print(model6.summary())
+    print(model7.summary())
+
+if __name__ == '__main__':
+    cleand = pd.read_csv('cleand_data.csv', sep=',')
+    model8 = smf.ols(
+        formula='RB_score ~ HN3d_cm',
+        data=cleand).fit()
+    print(model8.summary())
