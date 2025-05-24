@@ -89,17 +89,17 @@ def polar2complex(r, theta):
 def weather_slice(weather_data_csv_path, measurement_window):
     with open(weather_data_csv_path) as weather_data_file:
         weather_hourly = pd.read_csv(StringIO(weather_data_file.read().split('\n\n')[1]), sep=',')
-    measurement_date = datetime.strptime(weather_hourly.iloc[-1].time.split('T')[0], '%Y-%m-%d')
+    measurement_date = datetime.strptime(weather_hourly.iloc[-1].time, '%Y-%m-%dT%H:%M')
     weather_hourly['time'] = pd.to_datetime(weather_hourly['time'])
     weather_hourly = weather_hourly.set_index('time')
     if measurement_window == 1:
-        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=1)).strftime('%Y-%m-%d')]
+        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'):]
     elif measurement_window == 2:
-        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=3)).strftime('%Y-%m-%d'):(measurement_date - timedelta(days=2)).strftime('%Y-%m-%d')]
+        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S'):(measurement_date - timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S')]
     elif measurement_window == 3:
-        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=7)).strftime('%Y-%m-%d'):(measurement_date - timedelta(days=4)).strftime('%Y-%m-%d')]
+        weather_in_window = weather_hourly.loc[(measurement_date - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S'):(measurement_date - timedelta(days=4)).strftime('%Y-%m-%d %H:%M:%S')]
     elif measurement_window == 4:
-        weather_in_window = weather_hourly.loc[:(measurement_date - timedelta(days=8)).strftime('%Y-%m-%d')]
+        weather_in_window = weather_hourly.loc[:(measurement_date - timedelta(days=8)).strftime('%Y-%m-%d %H:%M:%S')]
     return weather_in_window
 
 
@@ -133,7 +133,8 @@ def sunshine_percentage(weather_data_csv_path, measurement_window):
 
 
 def create_df_for_instability_model(instability_df):
-    cleaned_data = instability_df[['No', 'Profile_ID', 'Date_time', 'Aspect', 'X_Coordinate', 'Y_Coordinate', 'Elevation', 'Slope_angle_degrees', 'RB_score', 'RB_release_type', 'RB_height_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'SNPK_Index', 'HN24_cm', 'HN3d_cm']].copy()
+    # cleaned_data = instability_df[['No', 'Profile_ID', 'Date_time', 'Aspect', 'X_Coordinate', 'Y_Coordinate', 'Elevation', 'Slope_angle_degrees', 'RB_score', 'RB_release_type', 'RB_height_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'SNPK_Index', 'HN24_cm', 'HN3d_cm']].copy()
+    cleaned_data = instability_df.copy()
     aspect_radians = {
         'N': np.pi/2,
         'NNE': 3*np.pi/8,
@@ -207,9 +208,9 @@ def data_setup():
     cleand_data.to_csv('cleand_data.csv', sep=',')
 
 
-if __name__ == 'hello':
-    # snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
-    # snow_instability = snow_instability[:-10]
+if __name__ == '__main__':
+    snow_instability = pd.read_csv("snow_instability_field_data.csv", sep = ";")
+    snow_instability = snow_instability[:-10]
     # avalanche_accidents = pd.read_csv("avalanche_accidents_switzerland_since_1995.csv", sep = ",", encoding="ISO-8859-1")
 
     # download_weather_data()
@@ -221,11 +222,11 @@ if __name__ == 'hello':
     #
     # snow_instability.describe()
 
-    # cleand = create_df_for_instability_model(snow_instability)
+    cleand = create_df_for_instability_model(snow_instability)
 
     # data_setup()
 
-    cleand = pd.read_csv('cleand_data.csv', sep=',')
+    # cleand = pd.read_csv('cleand_data.csv', sep=',')
 
     model1 = smf.ols(
         formula='RB_score ~ Slope_angle_degrees + Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d + Aspect_Delta_1d : Wind_Induced_Accumulation_Magnitude_1d + Aspect_Delta_3d : Wind_Induced_Accumulation_Magnitude_3d + Aspect_Delta_7d : Wind_Induced_Accumulation_Magnitude_7d + Aspect_Delta_14d : Wind_Induced_Accumulation_Magnitude_14d',
@@ -258,9 +259,24 @@ if __name__ == 'hello':
     print(model6.summary())
     print(model7.summary())
 
-if __name__ == '__main__':
-    cleand = pd.read_csv('cleand_data.csv', sep=',')
+if __name__ == 'hello':
+    # cleand = pd.read_csv('cleand_data.csv', sep=',')
+
+    snow_instability = pd.read_csv("snow_instability_field_data.csv", sep=";")
+    snow_instability = snow_instability[:-10]
+    cleand = create_df_for_instability_model(snow_instability)
+
     model8 = smf.ols(
         formula='RB_score ~ HN3d_cm',
         data=cleand).fit()
     print(model8.summary())
+
+    model9 = smf.ols(
+        formula='RF_Regional_danger_level_forecast ~ Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d',
+        data=cleand).fit()
+    print(model9.summary())
+
+    model10 = smf.ols(
+        formula='RB_score ~ C(RF_Regional_danger_level_forecast) + LN_Local_danger_level_nowcast',
+        data=cleand).fit()
+    print(model10.summary())
