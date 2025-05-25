@@ -8,19 +8,28 @@ from io import StringIO
 import cmath
 import time
 import statsmodels.formula.api as smf
+import statsmodels.api as sm
+from stat_model_diagnostics import LinearRegDiagnostic
 
 
-def convert_LV95_to_WGS84(easting, northing, altitute = None):
-    if altitute:
+def convert_LV95_to_WGS84(easting, northing, altitude = None):
+    """
+    Converts coordinates values from the swiss standard (LV95) to the global standard (WGS84).
+    :param easting: Easting in Swiss coordinate system (always starts with 2).
+    :param northing: Northing in Swiss coordinate system (always starts with 1).
+    :param altitude: Elevation (m a.s.l.)
+    :return: Dictionary with keys {'northing', 'easting', 'altitude'} for the values (as floats) in the global standard.
+    """
+    if altitude:
         resp = request("GET",
-                       "http://geodesy.geo.admin.ch/reframe/lv95towgs84?easting=" + str(easting) + "&northing=" + str(northing) + "&altitude=" + str(altitute) + "&format=json")
+                       "http://geodesy.geo.admin.ch/reframe/lv95towgs84?easting=" + str(easting) + "&northing=" + str(northing) + "&altitude=" + str(altitude) + "&format=json")
     else:
         resp = request("GET",
                        "http://geodesy.geo.admin.ch/reframe/lv95towgs84?easting=" + str(easting) + "&northing=" + str(northing) + "&format=json")
     location_point = json.loads(resp.data.decode('utf-8')[:-1])
     location_point['northing'] = round(float(location_point['northing']), 6)
     location_point['easting'] = round(float(location_point['easting']), 6)
-    if altitute:
+    if altitude:
         location_point['altitude'] = round(float(location_point['altitude']), 2)
     else:
         location_point['altitude'] = ''
@@ -29,6 +38,15 @@ def convert_LV95_to_WGS84(easting, northing, altitute = None):
 
 
 def save_weather_data(coordinates, start_date, end_date, folder_name, filename):
+    """
+    Downloads the weather data in a csv format.
+    :param coordinates: Dictionary with keys {'northing', 'easting', 'altitude'} for the values (as floats) in the global standard (WGS84).
+    :param start_date: String for the first day to be downloaded. Format: '%Y-%m-%d'.
+    :param end_date: String for the last day to be downloaded. Format: '%Y-%m-%d'.
+    :param folder_name: String with the folder path where the csv file will be saved.
+    :param filename: String with the filename of the csv file (without extension).
+    :return: None
+    """
     resp = request("GET",
                    "http://archive-api.open-meteo.com/v1/archive?latitude=" +
                    str(coordinates['northing']) +
@@ -47,6 +65,11 @@ def save_weather_data(coordinates, start_date, end_date, folder_name, filename):
 
 
 def date_and_time_of_observation(raw_daytime_value):
+    """
+    Reformats datetime string in the snow_instability dataset, in order to handle different formats used.
+    :param raw_daytime_value: Datetime value from the snow_instability dataset.
+    :return: Datetime object.
+    """
     if '.' in raw_daytime_value:
         raw_date, raw_time = raw_daytime_value.split(' ')
         raw_day, raw_month, raw_year = raw_date.split('.')
@@ -56,8 +79,14 @@ def date_and_time_of_observation(raw_daytime_value):
 
 # save_weather_data(convert_LV95_to_WGS84(2790000, 1190070, 2450), '2010-01-01', '2010-01-05', 'weather_data_instability', 'test')
 
-def download_weather_data():
-    for stability_measurement in snow_instability.itertuples():
+def download_weather_data(instability, accidents):
+    """
+    Downloads all the weather data for the last 14 days before every observation.
+    :param instability: Pandas dataframe, with the snow_instability dataset
+    :param accidents: Pandas dataframe, with the avalanche_accidents dataset
+    :return: Saves the weather data in a predefined folder structure.
+    """
+    for stability_measurement in instability.itertuples():
         measurement_coordinates = convert_LV95_to_WGS84(int(2000000 + stability_measurement.X_Coordinate),
                                                         int(1000000 + stability_measurement.Y_Coordinate),
                                                         int(stability_measurement.Elevation))
@@ -70,7 +99,7 @@ def download_weather_data():
                           'weather_data_instability',
                           'No' + str(int(stability_measurement.No)))
 
-    for avalanche_accident in avalanche_accidents.itertuples():
+    for avalanche_accident in accidents.itertuples():
         accident_coordinates = convert_LV95_to_WGS84(int(2000000 + avalanche_accident.start_zone_coordinates_x),
                                                      int(1000000 + avalanche_accident.start_zone_coordinates_y),
                                                      int(avalanche_accident.start_zone_elevation))
@@ -87,6 +116,12 @@ def polar2complex(r, theta):
     return r * np.exp(1j * theta)
 
 def weather_slice(weather_data_csv_path, measurement_window):
+    """
+    Returns a slice of the weather observations, to be used for predictor variables calculation.
+    :param weather_data_csv_path: csv file with the weather data for the location we are interested in.
+    :param measurement_window: Integer 1, 2, 3, or 4, that determined the measurement window: 0-24h, 72h-24h, 168h-72h, 336h-168h respectively (hours before observation).
+    :return: Pandas dataframe with hourly observations within the specified measurement window.
+    """
     with open(weather_data_csv_path) as weather_data_file:
         weather_hourly = pd.read_csv(StringIO(weather_data_file.read().split('\n\n')[1]), sep=',')
     measurement_date = datetime.strptime(weather_hourly.iloc[-1].time, '%Y-%m-%dT%H:%M')
@@ -104,6 +139,12 @@ def weather_slice(weather_data_csv_path, measurement_window):
 
 
 def snowfall_aspect_bias(weather_data_csv_path, measurement_window):
+    """
+    Sums up all the wind vectors (only during snowfall).
+    :param weather_data_csv_path: csv file with the weather data for the location we are interested in.
+    :param measurement_window: Integer 1, 2, 3, or 4, that determined the measurement window: 0-24h, 72h-24h, 168h-72h, 336h-168h respectively (hours before observation).
+    :return: Complex number. To be interpreted as a vector. Determines the snowfall aspect bias.
+    """
     wind_vector = 0j
     for _, row in weather_slice(weather_data_csv_path, measurement_window).iterrows():
         if row['precipitation (mm)'] != 0:
@@ -112,6 +153,12 @@ def snowfall_aspect_bias(weather_data_csv_path, measurement_window):
 
 
 def accumulated_snow_calculation(weather_data_csv_path, measurement_window):
+    """
+    Sums up the snowfall that occurred during the specified weather window
+    :param weather_data_csv_path: csv file with the weather data for the location we are interested in.
+    :param measurement_window: Integer 1, 2, 3, or 4, that determined the measurement window: 0-24h, 72h-24h, 168h-72h, 336h-168h respectively (hours before observation).
+    :return: Total snowfall in cm.
+    """
     total_snowfall = 0
     for _, row in weather_slice(weather_data_csv_path, measurement_window).iterrows():
         if row['snowfall (cm)'] != 0:
@@ -120,19 +167,42 @@ def accumulated_snow_calculation(weather_data_csv_path, measurement_window):
 
 
 def mean_temperature(weather_data_csv_path, measurement_window):
+    """
+    Calculates the mean temperature during the specified weather window.
+    :param weather_data_csv_path: csv file with the weather data for the location we are interested in.
+    :param measurement_window: Integer 1, 2, 3, or 4, that determined the measurement window: 0-24h, 72h-24h, 168h-72h, 336h-168h respectively (hours before observation).
+    :return: Mean temperature in degrees Celsius.
+    """
     return weather_slice(weather_data_csv_path, measurement_window)['temperature_2m (°C)'].mean()
 
 
 def std_temperature(weather_data_csv_path, measurement_window):
+    """
+    Calculates the standard deviation in temperature during the specified weather window.
+    :param weather_data_csv_path: csv file with the weather data for the location we are interested in.
+    :param measurement_window: Integer 1, 2, 3, or 4, that determined the measurement window: 0-24h, 72h-24h, 168h-72h, 336h-168h respectively (hours before observation).
+    :return: Standard deviation in temperature.
+    """
     return weather_slice(weather_data_csv_path, measurement_window)['temperature_2m (°C)'].std()
 
 
 def sunshine_percentage(weather_data_csv_path, measurement_window):
+    """
+    Calculates the sunshine duration during the specified weather window.
+    :param weather_data_csv_path: csv file with the weather data for the location we are interested in.
+    :param measurement_window: Integer 1, 2, 3, or 4, that determined the measurement window: 0-24h, 72h-24h, 168h-72h, 336h-168h respectively (hours before observation).
+    :return: Sunshine duration as a percentage of the total time in the measurement window.
+    """
     temperature_in_window = weather_slice(weather_data_csv_path, measurement_window)['sunshine_duration (s)']
     return temperature_in_window.sum()/(len(temperature_in_window) * 3600)
 
 
 def create_df_for_instability_model(instability_df):
+    """
+    Builds a cleaned dataframe, as a copy of the original, with only the variables of interest for the models.
+    :param instability_df: Pandas dataframe with the snow_instability dataset.
+    :return: Pandas dataframe with all the variables necessary for the model.
+    """
     # cleaned_data = instability_df[['No', 'Profile_ID', 'Date_time', 'Aspect', 'X_Coordinate', 'Y_Coordinate', 'Elevation', 'Slope_angle_degrees', 'RB_score', 'RB_release_type', 'RB_height_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'SNPK_Index', 'HN24_cm', 'HN3d_cm']].copy()
     cleaned_data = instability_df.copy()
     aspect_radians = {
@@ -202,6 +272,10 @@ def create_df_for_instability_model(instability_df):
 
 
 def data_setup():
+    """
+    Saves the cleand data in a csv. Only run once.
+    :return: None
+    """
     snow_instability = pd.read_csv("snow_instability_field_data.csv", sep=";")
     snow_instability = snow_instability[:-10]
     cleand_data = create_df_for_instability_model(snow_instability)
@@ -213,7 +287,7 @@ if __name__ == '__main__':
     snow_instability = snow_instability[:-10]
     # avalanche_accidents = pd.read_csv("avalanche_accidents_switzerland_since_1995.csv", sep = ",", encoding="ISO-8859-1")
 
-    # download_weather_data()
+    # download_weather_data(snow_instability, avalanche_accidents)
 
 
     # cor_matrix = snow_instability[['Profile_class', 'five_class_Stability', 'RB_score', 'RB_release_type', 'Fracture_plane_quality', 'S2008_1_RB', 'S2008_2_RT', 'S2008_3_Lemons', 'three_class_Stability', 'four_class_Stability_Techel', 'RB_height_cm', 'Snow_depth_cm', 'Slab_thickness_cm', 'FL_Thickness_cm', 'AL_Thickness_cm', 'FL_Grain_size_avg_mm', 'AL_Grain_size_avg_mm', 'FL_Grain_size_max_mm', 'AL_Grain_size_max_mm', 'FL_Grain_type1', 'FL_Grain_type2', 'FL_Hardness', 'FL_Top_Height_cm', 'FL_Bottom_Height_cm', 'AL_Top_Height_cm', 'AL_Bottom_Height_cm', 'AL_Hardness', 'Hard_Diff', 'Abs_Hard_Diff', 'Grain_Size_Diff_mm', 'FL_location', 'Lemon1_E', 'Lemon2_R', 'Lemon3_F', 'Lemon4_dE', 'Lemon5_dR', 'Lemon6_FLD', 'Lemons_FL', 'Whumpfs', 'Cracks', 'Avalanche_activity', 'LN_Local_danger_level_nowcast', 'LN_rounded', 'RF_Regional _danger_level_forecast', 'Deviation_LN_RF', 'SNPK_Index', 'SNPK_Index_Class']].corr()
@@ -259,12 +333,12 @@ if __name__ == '__main__':
     print(model6.summary())
     print(model7.summary())
 
-if __name__ == 'hello':
+if __name__ == '__main__':
     # cleand = pd.read_csv('cleand_data.csv', sep=',')
 
-    snow_instability = pd.read_csv("snow_instability_field_data.csv", sep=";")
-    snow_instability = snow_instability[:-10]
-    cleand = create_df_for_instability_model(snow_instability)
+    # snow_instability = pd.read_csv("snow_instability_field_data.csv", sep=";")
+    # snow_instability = snow_instability[:-10]
+    # cleand = create_df_for_instability_model(snow_instability)
 
     model8 = smf.ols(
         formula='RB_score ~ HN3d_cm',
@@ -277,6 +351,17 @@ if __name__ == 'hello':
     print(model9.summary())
 
     model10 = smf.ols(
-        formula='RB_score ~ C(RF_Regional_danger_level_forecast) + LN_Local_danger_level_nowcast',
+        formula='LN_Local_danger_level_nowcast ~ Accumulated_Snow_1d + Accumulated_Snow_3d + Accumulated_Snow_7d + Accumulated_Snow_14d + Average_Temperature_1d + Average_Temperature_3d + Average_Temperature_7d + Average_Temperature_14d + SD_Temperature_1d + SD_Temperature_3d + SD_Temperature_7d + SD_Temperature_14d + Sunshine_Percentage_1d + Sunshine_Percentage_3d + Sunshine_Percentage_7d + Sunshine_Percentage_14d',
         data=cleand).fit()
     print(model10.summary())
+
+    model11 = smf.ols(
+        formula='RB_score ~ C(RF_Regional_danger_level_forecast) + LN_Local_danger_level_nowcast',
+        data=cleand).fit()
+    print(model11.summary())
+
+    cleand.plot.scatter(x='Average_Temperature_1d', y='FL_Grain_size_avg_mm')
+
+    diagnostics_model = LinearRegDiagnostic(model11)
+    vif, fig, ax = diagnostics_model()
+    print(vif)
