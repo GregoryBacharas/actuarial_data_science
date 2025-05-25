@@ -34,7 +34,6 @@ def convert_LV95_to_WGS84(easting, northing, altitude = None):
     else:
         location_point['altitude'] = ''
     return location_point
-    # return str(location_point['northing']) + ', ' + str(location_point['easting']) + ', ' + str(location_point['altitude'])
 
 
 def save_weather_data(coordinates, start_date, end_date, folder_name, filename):
@@ -77,7 +76,6 @@ def date_and_time_of_observation(raw_daytime_value):
         return datetime(int(raw_year), int(raw_month), int(raw_day), int(raw_hour), int(raw_minute), 0)
     return datetime.fromisoformat(raw_daytime_value.replace(' ', 'T'))
 
-# save_weather_data(convert_LV95_to_WGS84(2790000, 1190070, 2450), '2010-01-01', '2010-01-05', 'weather_data_instability', 'test')
 
 def download_weather_data(instability, accidents):
     """
